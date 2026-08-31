@@ -24,6 +24,16 @@ LEVELS = ("Low", "Medium", "High")
 DIFFICULTIES = ("Easy", "Medium", "Hard")
 
 
+def password_matches(stored_hash, password):
+    """Reject damaged/legacy hashes safely instead of returning a server error."""
+    if not isinstance(stored_hash, str) or not stored_hash or not stored_hash.split("$", 1)[0]:
+        return False
+    try:
+        return check_password_hash(stored_hash, password)
+    except (TypeError, ValueError):
+        return False
+
+
 class User(db.Model):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -99,7 +109,7 @@ def create_app(test_config=None):
             email = request.form.get("email", "").strip().lower()
             password = request.form.get("password", "")
             user = db.session.execute(db.select(User).where(User.email == email)).scalar_one_or_none()
-            if user and check_password_hash(user.password_hash, password):
+            if user and password_matches(user.password_hash, password):
                 session.clear(); session["user_id"] = user.id; session["user_name"] = user.full_name
                 session.permanent = True
                 return redirect(url_for("add_feedback"))
@@ -124,7 +134,15 @@ def create_app(test_config=None):
                     flash("Account created successfully. You can now log in.", "success")
                     return redirect(url_for("login"))
                 except IntegrityError:
-                    db.session.rollback(); flash("An account already exists for this email.", "error")
+                    db.session.rollback()
+                    existing = db.session.execute(db.select(User).where(User.email == email)).scalar_one_or_none()
+                    if existing and not existing.password_hash.split("$", 1)[0]:
+                        existing.full_name = name
+                        existing.password_hash = generate_password_hash(password)
+                        db.session.commit()
+                        flash("Your incomplete account was repaired successfully. You can now log in.", "success")
+                        return redirect(url_for("login"))
+                    flash("An account already exists for this email.", "error")
         return render_template("register.html")
 
     @app.route("/forgot-password", methods=["GET", "POST"])
