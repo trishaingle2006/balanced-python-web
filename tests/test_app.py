@@ -39,3 +39,17 @@ def test_invalid_dropdown_rejected(client):
     register(client); login(client)
     response=client.post("/feedback",data={"subject":"DBMS","work_type":"Hacked","deadline":"2030-01-02","difficulty":"Medium","stress":"High","feedback":"Test"},follow_redirects=True)
     assert b"valid information" in response.data
+
+def test_malformed_password_hash_never_causes_500(app,client):
+    with app.app_context():
+        db.session.add(User(full_name="Broken Account",email="broken@example.com",password_hash="$damaged")); db.session.commit()
+    response=client.post("/login",data={"email":"broken@example.com","password":"StrongPass8"},follow_redirects=True)
+    assert response.status_code==200 and b"incorrect" in response.data
+
+def test_registration_repairs_unusable_account(app,client):
+    with app.app_context():
+        db.session.add(User(full_name="Broken Account",email="repair@example.com",password_hash="$damaged")); db.session.commit()
+    response=register(client,"repair@example.com")
+    assert b"repaired successfully" in response.data
+    response=login(client,"repair@example.com")
+    assert b"Save Feedback" in response.data
